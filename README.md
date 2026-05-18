@@ -73,6 +73,25 @@ If you need to use a debugger (like VSCode or PyCharm) or just want hot-reloadin
    ```
 *(When you are done debugging, you can restart the docker container with `docker-compose start api` or just `docker-compose up -d`)*
 
+
+---
+
+### 🗄️ Making Database Changes (Alembic)
+
+If you modify the SQLAlchemy models (e.g., adding a new column to app/db/models.py), you need to generate a new Alembic migration script and apply it to the database. Make sure your local virtual environment is active and the database container is running.
+
+1. *Generate the migration script:*
+   ```bash
+   alembic revision --autogenerate -m "describe_your_change_here"
+   ```
+   
+2. *Apply the migration to the database:*
+   ```bash
+   alembic upgrade head
+   ```
+   
+(Note: If you are running the API via Docker, the docker-compose up command automatically runs alembic upgrade head on startup, so you only need to run this manually if you are debugging outside of Docker.)
+
 ---
 
 ## 📊 Observability & Logging
@@ -97,30 +116,6 @@ To run the test suite locally:
 # Ensure your virtual environment is active
 PYTHONPATH=. pytest -v tests/
 ```
-
----
-
-## ☁️ Deploying to AWS EC2 (Docker Compose Approach) - Simplest Way!
-
-Deploying this to a single AWS EC2 instance is incredibly straightforward.
-
-1. **Provision an EC2 Instance:** Launch a `t3.small` instance (Ubuntu) and open port `8000` (and `22` for SSH) in your Security Group.
-2. **Install Docker:** SSH into your instance and install `docker` and `docker-compose`.
-3. **Clone the Repository:** Pull your codebase onto the EC2 instance.
-4. **Set Environment Variables:** Before running docker-compose, export the production environment variables to override the local development defaults. Specifically, you must update the `BASE_URL` so that the generated short links point to your EC2 instance instead of `localhost`.
-
-   ```bash
-   # Use your EC2 Public IP or Domain Name
-   export BASE_URL="http://your-ec2-ip.compute.amazonaws.com:8000"
-   
-   # Set strong production secrets
-   export SECRET_KEY="your_super_secret_production_key"
-   export POSTGRES_PASSWORD="your_strong_db_password"
-   ```
-5. **Start the Stack:**
-   ```bash
-   docker-compose up --build -d
-   ```
 
 ---
 
