@@ -92,10 +92,7 @@ jobs:
           name: dev-url-shortener-database
           template: aws-deploy/database.yml
           no-fail-on-empty-changeset: "true"
-          parameter-overrides: |
-            EnvironmentName=dev
-            DBUsername=${{ secrets.DB_USERNAME }}
-            DBPassword=${{ secrets.DB_PASSWORD }}
+          parameter-overrides: "EnvironmentName=dev,DBUsername=${{ secrets.DB_USERNAME }},DBPassword=${{ secrets.DB_PASSWORD }}"
 
   # 3. Build & Push Stage (Builds container and pushes to ECR)
   build-and-push:
@@ -157,9 +154,4 @@ jobs:
           template: aws-deploy/ecs-service.yml
           no-fail-on-empty-changeset: "true"
           capabilities: CAPABILITY_IAM,CAPABILITY_NAMED_IAM
-          parameter-overrides: |
-            EnvironmentName=dev
-            ContainerImage=${{ steps.login-ecr.outputs.registry }}/dev-url-shortener-backend:${{ github.sha }}
-            DBUsername=${{ secrets.DB_USERNAME }}
-            DBPassword=${{ secrets.DB_PASSWORD }}
-            SecretKey=${{ secrets.FASTAPI_SECRET_KEY }}
+          parameter-overrides: "EnvironmentName=dev,ContainerImage=${{ steps.login-ecr.outputs.registry }}/dev-url-shortener-backend:${{ github.sha }},DBUsername=${{ secrets.DB_USERNAME }},DBPassword=${{ secrets.DB_PASSWORD }},SecretKey=${{ secrets.FASTAPI_SECRET_KEY }}"
