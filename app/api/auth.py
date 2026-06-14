@@ -36,4 +36,10 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
             headers={"WWW-Authenticate": "Bearer"},
         )
     return create_tokens_for_user(db, str(user.id))
+@router.get("/user/me", response_model=TokenResponse)
+def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    user = authenticate_user(db, email=form_data.username, password=form_data.password)
+    if user:
+
+        return form_data.username
 

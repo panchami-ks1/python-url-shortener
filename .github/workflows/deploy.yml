@@ -1,0 +1,145 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '**'
+      - '.github/workflows/deploy.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '**'
+
+jobs:
+  # 1. Test Stage (Runs on push & PRs)
+  test:
+    name: Run Unit & Integration Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Pytest
+        run: |
+          PYTHONPATH=. pytest -v tests/
+
+  # 2. Infrastructure Stage (Deploys VPC, ECR, and Database)
+  deploy-infra:
+    name: Deploy Infrastructure (VPC, ECR, RDS, Redis)
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment:
+      name: dev
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      # Step A: Deploy VPC & ECR Stack
+      - name: Deploy VPC Stack
+        uses: aws-actions/aws-cloudformation-github-deploy@v1
+        with:
+          name: dev-url-shortener-vpc
+          template: aws-deploy/vpc.yml
+          no-fail-on-empty-changeset: "true"
+          parameter-overrides: "EnvironmentName=dev"
+
+      # Step B: Deploy Database (RDS & Redis) Stack
+      - name: Deploy Database Stack
+        uses: aws-actions/aws-cloudformation-github-deploy@v1
+        with:
+          name: dev-url-shortener-database
+          template: aws-deploy/database.yml
+          no-fail-on-empty-changeset: "true"
+          parameter-overrides: |
+            EnvironmentName=dev
+            DBUsername=${{ secrets.DB_USERNAME }}
+            DBPassword=${{ secrets.DB_PASSWORD }}
+
+  # 3. Build & Push Stage (Builds container and pushes to ECR)
+  build-and-push:
+    name: Build & Push Docker Image
+    needs: deploy-infra
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, Tag, and Push Image to ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: dev-url-shortener-backend
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+  # 4. App Deployment Stage (Requires Manual Approval to deploy ECS Service)
+  deploy-app:
+    name: Deploy App to ECS Fargate
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    environment:
+      name: dev # Manual Approval Gate configured via GitHub Environment
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # Deploy / Update ECS service and target groups
+      - name: Deploy ECS Stack
+        uses: aws-actions/aws-cloudformation-github-deploy@v1
+        with:
+          name: dev-url-shortener-ecs
+          template: aws-deploy/ecs-service.yml
+          no-fail-on-empty-changeset: "true"
+          capabilities: CAPABILITY_IAM,CAPABILITY_NAMED_IAM
+          parameter-overrides: |
+            EnvironmentName=dev
+            ContainerImage=${{ steps.login-ecr.outputs.registry }}/dev-url-shortener-backend:${{ github.sha }}
+            DBUsername=${{ secrets.DB_USERNAME }}
+            DBPassword=${{ secrets.DB_PASSWORD }}
+            SecretKey=${{ secrets.FASTAPI_SECRET_KEY }}

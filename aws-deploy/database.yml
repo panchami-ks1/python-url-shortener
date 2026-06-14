@@ -1,0 +1,142 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Database and Cache Infrastructure for URL Shortener (RDS PostgreSQL and ElastiCache Redis).
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: dev
+    Description: Environment name (e.g. dev, prod)
+
+  DBInstanceClass:
+    Type: String
+    Default: db.t3.micro
+    Description: Database instance class (db.t3.micro is free-tier eligible)
+
+  DBUsername:
+    Type: String
+    Default: url_user
+    Description: Database master username
+
+  DBPassword:
+    Type: String
+    NoEcho: true
+    Description: Database master password
+
+  CacheNodeType:
+    Type: String
+    Default: cache.t3.micro
+    Description: Redis cache node type (cache.t3.micro is free-tier eligible)
+
+Resources:
+  # Security Groups
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub Security group for ${EnvironmentName} RDS database
+      VpcId:
+        Fn::ImportValue: !Sub ${EnvironmentName}-VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-db-sg
+
+  RedisSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub Security group for ${EnvironmentName} Redis cache
+      VpcId:
+        Fn::ImportValue: !Sub ${EnvironmentName}-VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-redis-sg
+
+  # Subnet Groups
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: !Sub Subnet group for ${EnvironmentName} RDS
+      SubnetIds:
+        - Fn::ImportValue: !Sub ${EnvironmentName}-PrivateSubnet1Id
+        - Fn::ImportValue: !Sub ${EnvironmentName}-PrivateSubnet2Id
+
+  RedisSubnetGroup:
+    Type: AWS::ElastiCache::SubnetGroup
+    Properties:
+      Description: !Sub Subnet group for ${EnvironmentName} Redis
+      SubnetIds:
+        - Fn::ImportValue: !Sub ${EnvironmentName}-PrivateSubnet1Id
+        - Fn::ImportValue: !Sub ${EnvironmentName}-PrivateSubnet2Id
+
+  # PostgreSQL DB Instance
+  PostgreSQLDB:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBName: url_shortener
+      Engine: postgres
+      EngineVersion: '15'
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: '20'
+      MaxAllocatedStorage: '50'
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups:
+        - !Ref DatabaseSecurityGroup
+      MultiAZ: false
+      PubliclyAccessible: false
+      DeletionProtection: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-postgres
+
+  # Redis Cache Cluster (Single node for dev/low-cost)
+  RedisCache:
+    Type: AWS::ElastiCache::CacheCluster
+    Properties:
+      ClusterName: !Sub ${EnvironmentName}-redis
+      Engine: redis
+      EngineVersion: '7.0'
+      CacheNodeType: !Ref CacheNodeType
+      NumCacheNodes: 1
+      CacheSubnetGroupName: !Ref RedisSubnetGroup
+      VpcSecurityGroupIds:
+        - !GetAtt RedisSecurityGroup.Id
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-redis
+
+Outputs:
+  DatabaseEndPointAddress:
+    Description: RDS Endpoint Address
+    Value: !GetAtt PostgreSQLDB.Endpoint.Address
+    Export:
+      Name: !Sub ${EnvironmentName}-DatabaseEndPointAddress
+
+  DatabaseEndPointPort:
+    Description: RDS Endpoint Port
+    Value: !GetAtt PostgreSQLDB.Endpoint.Port
+    Export:
+      Name: !Sub ${EnvironmentName}-DatabaseEndPointPort
+
+  DatabaseSecurityGroupId:
+    Description: Database Security Group ID
+    Value: !Ref DatabaseSecurityGroup
+    Export:
+      Name: !Sub ${EnvironmentName}-DatabaseSecurityGroupId
+
+  RedisEndPointAddress:
+    Description: Redis Endpoint Address
+    Value: !GetAtt RedisCache.RedisEndpoint.Address
+    Export:
+      Name: !Sub ${EnvironmentName}-RedisEndPointAddress
+
+  RedisEndPointPort:
+    Description: Redis Endpoint Port
+    Value: !GetAtt RedisCache.RedisEndpoint.Port
+    Export:
+      Name: !Sub ${EnvironmentName}-RedisEndPointPort
+
+  RedisSecurityGroupId:
+    Description: Redis Security Group ID
+    Value: !Ref RedisSecurityGroup
+    Export:
+      Name: !Sub ${EnvironmentName}-RedisSecurityGroupId
